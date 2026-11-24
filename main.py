@@ -1,11 +1,18 @@
 """Fortune-cookie wisdom entry for make.fun.
 
 Writes the single fortune-cookie line to entry.txt in the output directory
-($MAKEFUN_OUTPUT_DIR, default /output). Stdlib only, deterministic.
+($MAKEFUN_OUTPUT_DIR, default /output). Stdlib only, deterministic, no
+network and no side effects beyond the one output file.
 
 Gate (from the competition rules): /output/entry.txt must be UTF-8 text
 of 1 to 120 characters, not only white space. The entry is written with
 no trailing newline so the file holds exactly the judged line.
+
+Modes:
+  (default)   validate ENTRY, write it, read it back, confirm byte-identical
+  --check     validate ENTRY only and exit; writes nothing
+  --self-test validate ENTRY and check a byte-identical write/read
+              round-trip in a temporary directory, then exit
 """
 
 import argparse
@@ -20,6 +27,29 @@ ENTRY = (
 MAX_CHARS = 120
 
 
+def _check_spacing(text: str) -> list[str]:
+    """Reject sloppy spacing: double spaces or leading/trailing blanks.
+
+    A fortune-cookie line is printed verbatim, so an accidental double
+    space or a stray leading/trailing blank would show up in the judged
+    text. Keep the check strict even though the entry itself is fixed.
+    """
+    problems = []
+    if text != text.strip():
+        problems.append("entry has leading or trailing whitespace")
+    if "  " in text:
+        problems.append("entry contains a double space")
+    return problems
+
+
+def _check_punctuation(text: str) -> list[str]:
+    """Reject a line that ends mid-thought or with stray punctuation."""
+    problems = []
+    if text.rstrip().endswith((",", ";", ":")):
+        problems.append("entry ends with trailing clause punctuation")
+    return problems
+
+
 def validate(text: str) -> list[str]:
     """Return a list of gate failures for `text` (empty means valid)."""
     problems = []
@@ -29,6 +59,8 @@ def validate(text: str) -> list[str]:
         problems.append("entry is only white space")
     if "\n" in text:
         problems.append("entry must be a single line")
+    problems.extend(_check_spacing(text))
+    problems.extend(_check_punctuation(text))
     try:
         text.encode("utf-8")
     except UnicodeEncodeError as exc:  # pragma: no cover - defensive
@@ -78,7 +110,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--self-test", action="store_true",
                         help="validate ENTRY and check a byte-identical "
                              "write/read round-trip, then exit")
+    parser.add_argument("--check", action="store_true",
+                        help="validate ENTRY only (no file written) and exit")
     args = parser.parse_args(argv)
+
+    if args.check:
+        problems = validate(ENTRY)
+        if problems:
+            print("check FAIL: " + "; ".join(problems), file=sys.stderr)
+            return 1
+        print(f"check OK: ENTRY valid ({len(ENTRY)} chars)")
+        return 0
 
     if args.self_test:
         return self_test()
